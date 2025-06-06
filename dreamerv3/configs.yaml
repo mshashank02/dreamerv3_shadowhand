@@ -196,7 +196,7 @@ loconav:
   run.train_ratio: 256
 
 shadowhand:
-  task: gymnasium_HandReach-v2
+  task: gymnasium_Reacher-v5
   run: {envs: 1, steps: 1e6, train_ratio: 64, log_every: 1000, eval_envs: 1}
 
 
