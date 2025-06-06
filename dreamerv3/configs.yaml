@@ -197,14 +197,8 @@ loconav:
 
 shadowhand:
   task: gymnasium_HandReach-v2
-  run.steps: 1e6
-  run.train_ratio: 64
-  run.log_every: 1000
-  run.eval_every: 5000
-  run.envs: 1
-  run.eval_envs: 1
+  run: {envs: 1, steps: 1e6, train_ratio: 64, log_every: 1000, eval_every: 5000, eval_envs: 1}
   env.gymnasium.render_mode: rgb_array
-  env.gymnasium.max_episode_steps: 100
 
 
 
