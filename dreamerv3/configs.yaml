@@ -20,8 +20,8 @@ defaults:
   errfile: False
 
   logger:
-    outputs: [jsonl, scope]
-    filter: 'score|length|fps|ratio|train/loss/|train/rand/'
+    outputs: [jsonl, tensorboard]
+    filter: 'episode/image|score|length|fps|ratio|train/loss/|train/rand/'
     timer: True
     fps: 15
     user: ''
@@ -197,7 +197,7 @@ loconav:
 
 shadowhand:
   task: gymnasium_Reacher-v5
-  run: {envs: 1, steps: 1e6, train_ratio: 64, log_every: 1000, eval_envs: 1}
+  run: {envs: 1, steps: 1e6, train_ratio: 32.0, log_every: 120, eval_envs: 1}
 
 
 
