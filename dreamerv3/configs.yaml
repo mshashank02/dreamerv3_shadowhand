@@ -199,6 +199,10 @@ shadowhand:
   task: gymnasium_Reacher-v5
   run: {envs: 1, steps: 1e6, train_ratio: 32.0, log_every: 120, eval_envs: 1}
 
+shadowhand_actual:
+  task: gymnasium_HandReach-v2
+  run: {envs: 1, steps: 1e6, train_ratio: 32.0, log_every: 120, eval_envs: 1}
+
 
 
 multicpu:

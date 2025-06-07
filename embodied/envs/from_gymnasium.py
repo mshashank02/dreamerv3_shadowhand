@@ -14,10 +14,10 @@ import functools
 from typing import Any, Generic, TypeVar, Union, cast, Dict
 
 import embodied
-import gymnasium
+import gymnasium 
+import gymnasium_robotics
 import numpy as np
 import elements
-
 U = TypeVar('U')
 V = TypeVar('V')
 
@@ -44,13 +44,25 @@ class FromGymnasium(embodied.Env, Generic[U, V]):
   @functools.cached_property
   def obs_space(self):
     if self._obs_dict:
-      # cast is here to stop type checkers from complaining (we already check
-      # that .spaces attr exists in __init__ as a proxy for the type check)
       obs_space = cast(gymnasium.spaces.Dict, self._env.observation_space)
       spaces = obs_space.spaces
+
+      # Special case: Gymnasium-Robotics style GoalEnv
+      if all(key in spaces for key in ['observation', 'desired_goal', 'achieved_goal']):
+        # Flatten each subspace inside the goal dict
+        flat_spaces = {}
+        for key, subspace in spaces.items():
+          if isinstance(subspace, gymnasium.spaces.Dict):
+            flat_spaces.update({f"{key}/{k}": v for k, v in subspace.spaces.items()})
+          else:
+            flat_spaces[key] = subspace
+        spaces = flat_spaces
     else:
       spaces = {self._obs_key: self._env.observation_space}
+
+    # Convert each Gym space to an Elements space
     spaces = {k: self._convert(v) for k, v in spaces.items()}
+    
     return {
         **spaces,
         'reward': elements.Space(np.float32),
@@ -90,16 +102,38 @@ class FromGymnasium(embodied.Env, Generic[U, V]):
 
   def _obs(
       self, obs, reward, is_first=False, is_last=False, is_terminal=False):
+    
     if not self._obs_dict:
       obs = {self._obs_key: obs}
-    obs = self._flatten(obs)
+
+    # Special handling for GoalEnv-style observations
+    elif all(k in obs for k in ['observation', 'desired_goal', 'achieved_goal']):
+      # Flatten the goal observation structure
+      goal_obs = {}
+      for key in ['observation', 'desired_goal', 'achieved_goal']:
+        value = obs[key]
+        if isinstance(value, dict):
+          # Nested dict inside one of the goal components
+          for subkey, subval in value.items():
+            goal_obs[f"{key}/{subkey}"] = subval
+        else:
+          goal_obs[key] = value
+      obs = goal_obs
+
+    else:
+      # If not GoalEnv style, just flatten any nested dict
+      obs = self._flatten(obs)
+
+    # Convert to NumPy arrays and add meta info
     np_obs: Dict[str, Any] = {k: np.asarray(v) for k, v in obs.items()}
     np_obs.update(
         reward=np.float32(reward),
         is_first=is_first,
         is_last=is_last,
         is_terminal=is_terminal)
+    
     return np_obs
+
 
   def render(self):
     image = self._env.render()
