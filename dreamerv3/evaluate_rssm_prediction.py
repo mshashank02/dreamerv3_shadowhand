@@ -38,7 +38,17 @@ def evaluate_rssm_prediction(args):
     agent = Agent(obs_space, act_space, config.agent)
     checkpoint = elements.Checkpoint()
     checkpoint.agent = agent
-    checkpoint.load(args.ckpt or args.logdir, keys=['agent'])
+    ckpt_dir = elements.Path(args.logdir)
+    if args.ckpt == 'latest':
+        latest_ckpt = max((ckpt_dir / 'checkpoints').glob('*'), key=lambda p: p.stat().st_mtime, default=None)
+        if latest_ckpt is None:
+            raise FileNotFoundError(f"No checkpoint found in {ckpt_dir}/checkpoints")
+        
+    else:
+        latest_ckpt = ckpt_dir / 'checkpoints' / args.ckpt
+    
+    print(f"Loading checkpoint: {latest_ckpt}")
+    checkpoint.load(latest_ckpt, keys=['agent'])
 
     # Initialize
     obs = env.reset()
