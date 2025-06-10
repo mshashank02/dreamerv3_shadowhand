@@ -1,91 +1,88 @@
 import os
+import sys
+import pathlib
 import argparse
 import numpy as np
+import ruamel.yaml as yaml
+import elements
+import embodied
+
+from embodied import Agent
+from embodied.envs.from_gymnasium import FromGymnasium
+
 from skimage.metrics import structural_similarity as ssim
 
-import embodied
-import jax
-import jax.numpy as jnp
 
-from dreamerv3 import agent as agent_mod
-from embodied import load_config
+# === CONFIG LOADER ===
+def load_cfg(logdir_path, task):
+    logdir = elements.Path(logdir_path)
+    config_path = logdir / 'config.yaml'
+
+    yaml_loader = yaml.YAML(typ='safe')
+    raw_cfg = yaml_loader.load(config_path.read())
+
+    config = elements.Config(raw_cfg)
+    config = config.update(task=task, logdir=str(logdir))
+    return config
 
 
-def load_agent(logdir, task, ckpt):
-    config = embodied.Config()
-    config = config.update(logdir=logdir, run=dict(task=task))
-    config = config.update(task=task)
-    config = config.update({'jax': {}})  # Avoid KeyError: 'jax'
+# === MAIN EVALUATION SCRIPT ===
+def evaluate_rssm_prediction(args):
+    config = load_cfg(args.logdir, args.task)
 
-    # Load config from checkpoint directory if exists
-    config_path = os.path.join(logdir, 'config.yaml')
-    if os.path.exists(config_path):
-        config = config.update(embodied.Config(yaml=embodied.Path(config_path).read()))
-
-    env = embodied.envs.from_gymnasium.FromGymnasium(task)
+    # Load environment and agent
+    env = FromGymnasium(args.task)
     obs_space = env.obs_space
     act_space = env.act_space
-    env.close()
 
-    agent = agent_mod.Agent(obs_space, act_space, config)
-    checkpoint = embodied.Checkpoint()
+    agent = Agent(obs_space, act_space, config.agent)
+    checkpoint = elements.Checkpoint()
     checkpoint.agent = agent
-    checkpoint.load(logdir, ckpt)
+    checkpoint.load(args.ckpt or args.logdir, keys=['agent'])
 
-    return agent, obs_space
+    # Initialize
+    obs = env.reset()
+    state = agent.init_policy(batch_size=1)
 
+    # Collect N transitions from the real environment
+    num_steps = args.steps
+    real_obs, pred_obs = [], []
+    total_l2, total_ssim = 0.0, 0.0
 
-def evaluate(agent, obs_space, logdir, batch_size=4):
-    replay_dir = os.path.join(logdir, 'replay')
-    replay = embodied.replay.Replay(
-        length=50, capacity=10000, online=False, chunksize=50,
-        directory=replay_dir)
+    for _ in range(num_steps):
+        act = agent.policy(obs, state, mode='eval')
+        next_obs, _, done, _ = env.step(act)
 
-    ssim_scores, l2_errors = [], []
-    print("Collecting samples...")
-    for _ in range(10):
-        batch = replay.sample(batch_size, 'train')
+        # Predict next obs from RSSM using current obs and action
+        _, _, embed = agent.encoder(state, obs, reset=False, training=False, single=True)
+        _, feat = agent.rssm.observe(state, embed, act, reset=False, training=False, single=True)
+        _, _, recon = agent.decoder(state, feat, reset=False, training=False, single=True)
 
-        obs = batch['obs']  # [B, T, *]
-        actions = batch['action']
-        resets = batch['reset']
+        obs_image = obs['image'].astype(np.float32) / 255.0
+        recon_image = recon['image'].mean().numpy().squeeze()
 
-        carry = agent.rssm.initial(batch_size)
-        carry, entries, _ = agent.rssm.observe(
-            carry, batch['embed'], actions, resets, training=False)
+        l2_loss = np.mean((obs_image - recon_image) ** 2)
+        ssim_score = ssim(obs_image, recon_image, multichannel=True)
 
-        # Predict next observation from RSSM state
-        features = {k: entries[k][:, :-1] for k in ('deter', 'stoch')}
-        feats = {k: jnp.reshape(v, (-1, *v.shape[2:])) for k, v in features.items()}
-        carry = {k: v[:, -1] for k, v in features.items()}
+        total_l2 += l2_loss
+        total_ssim += ssim_score
 
-        # Decode from features
-        _, _, decoded = agent.decoder({}, feats, reset=np.zeros_like(resets[:, 1:]), training=False)
-        true_obs = obs['image'][:, 1:]  # Ground truth next obs
+        real_obs.append(obs_image)
+        pred_obs.append(recon_image)
 
-        decoded_img = np.clip(decoded['image'].mean(), 0, 1) * 255
-        decoded_img = decoded_img.astype(np.uint8)
+        obs = next_obs if not done else env.reset()
 
-        true_img = true_obs.reshape((-1,) + true_obs.shape[2:])
-
-        for i in range(true_img.shape[0]):
-            gt = true_img[i]
-            pred = decoded_img[i]
-            ssim_score = ssim(gt, pred, channel_axis=-1)
-            l2_error = np.mean((gt.astype(np.float32) - pred.astype(np.float32)) ** 2)
-            ssim_scores.append(ssim_score)
-            l2_errors.append(l2_error)
-
-    print("Avg SSIM:", np.mean(ssim_scores))
-    print("Avg L2 Error:", np.mean(l2_errors))
+    print(f"Average L2 Loss: {total_l2 / num_steps:.4f}")
+    print(f"Average SSIM:   {total_ssim / num_steps:.4f}")
 
 
+# === ENTRY POINT ===
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--logdir', required=True)
-    parser.add_argument('--task', required=True)
-    parser.add_argument('--ckpt', default='latest')
+    parser.add_argument('--logdir', required=True, help='Path to logdir with config and checkpoint')
+    parser.add_argument('--task', required=True, help='Gymnasium task name')
+    parser.add_argument('--ckpt', default='latest', help='Checkpoint path or "latest"')
+    parser.add_argument('--steps', type=int, default=100, help='Number of evaluation steps')
     args = parser.parse_args()
 
-    agent, obs_space = load_agent(args.logdir, args.task, args.ckpt)
-    evaluate(agent, obs_space, args.logdir)
+    evaluate_rssm_prediction(args)
