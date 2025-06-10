@@ -1,106 +1,142 @@
-# File: eval_rssm_transition.py
-# Usage:
-#   python eval_rssm_transition.py \
-#     --logdir  ~/logdir/20250607T161746 \
-#     --task    gymnasium_HandReach-v2 \
-#     --ckpt    latest              # or "checkpoint_009000.npz"
-#
-# Requires: pip install scikit-image
+# File: evaluate_rssm_prediction.py  
+"""
+Evaluate how well a Dreamer‑V3 world‑model (RSSM + Encoder + Decoder)
+predicts the next observation given (s_t, a_t).
 
-import sys
-import argparse, os, glob, importlib, functools
+Produces:
+* Mean L2 error between predicted and true next RGB frame
+* Mean SSIM (structural similarity) score
 
-root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))  # one level up
-sys.path.insert(0, root)
+Usage (from project root):
+
+  ```bash
+  python dreamerv3/evaluate_rssm_prediction.py \
+      --logdir  ~/logdir/dreamer/20250607T161746 \
+      --preset  shadowhand_actual              \
+      --ckpt    latest                         
+  ```
+
+Requirements:
+  pip install scikit-image ruamel.yaml
+"""
+
+import argparse, os, sys, glob, pathlib, importlib
+from typing import Dict, Any
 
 import numpy as np
 import jax, jax.numpy as jnp
-from skimage.metrics import structural_similarity as ssim
+from skimage.metrics import structural_similarity as sk_ssim
 
-# -----------------------------------------------------------------------------#
-# 1.  Helpers – tiny wrappers around your dreamerv3_shadowhand codebase
-# -----------------------------------------------------------------------------#
-def load_cfg_and_agent(root, task):
-    """Dynamically import your code and create an agent."""
-    sys.path.insert(0, root)                       # make package importable
-    main_mod   = importlib.import_module('dreamerv3.main')
-    agent_mod  = importlib.import_module('dreamerv3.agent')
-    cfg_loader = importlib.import_module('elements').Config
-    configs    = cfg_loader('dreamerv3/configs.yaml')
-    config     = cfg_loader(configs['defaults']).update({'task': task})
-    agent      = agent_mod.Agent(
-        obs_space={}, act_space={}, config=config.agent)   # minimal init
-    return config, agent, main_mod.make_env
+# -----------------------------------------------------------------------------
+# 0.  Make project package importable  (.. / dreamerv3 / this_file.py)
+# -----------------------------------------------------------------------------
+PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))   # now `import dreamerv3` works
 
-def latest_ckpt(ckpt_dir):
-    ckpts = sorted(glob.glob(os.path.join(ckpt_dir, 'checkpoint_*.npz')))
-    assert ckpts, f'no checkpoints in {ckpt_dir}'
+# -----------------------------------------------------------------------------
+# 1.  Helper: load config exactly like main.py
+# -----------------------------------------------------------------------------
+import ruamel.yaml, elements
+
+def load_config(yaml_path: pathlib.Path, preset: str, extra: Dict[str, Any] | None = None):
+    yaml_text = yaml_path.read_text()
+    cfgs_dict = ruamel.yaml.YAML(typ="safe").load(yaml_text)
+    cfg = elements.Config(cfgs_dict["defaults"]).update(cfgs_dict[preset])
+    if extra:
+        cfg = cfg.update(extra)
+    return cfg
+
+# -----------------------------------------------------------------------------
+# 2.  Latest checkpoint helper
+# -----------------------------------------------------------------------------
+
+def latest_ckpt(ckpt_dir: pathlib.Path) -> pathlib.Path:
+    ckpts = sorted(ckpt_dir.glob("checkpoint_*.npz"))
+    if not ckpts:
+        raise FileNotFoundError(f"no checkpoints in {ckpt_dir}")
     return ckpts[-1]
 
-def restore(agent, ckpt_file):
-    from embodied.core import checkpoint
-    checkpoint.Checkpoint(os.path.dirname(ckpt_file)).restore(agent, ckpt_file)
+# -----------------------------------------------------------------------------
+# 3.  Restore agent state
+# -----------------------------------------------------------------------------
 
-# -----------------------------------------------------------------------------#
-# 2.  Evaluation core
-# -----------------------------------------------------------------------------#
-def l2(a, b):   return np.mean((a.astype(np.float32) - b.astype(np.float32))**2)
+def restore_agent(agent, ckpt_file: pathlib.Path):
+    from embodied.core import checkpoint as ckpt_lib
+    ckpt_lib.Checkpoint(ckpt_file.parent).restore(agent, ckpt_file)
 
-def evaluate(agent, env, steps=50):
-    obs_list, nxt_list, act_list = [], [], []
+# -----------------------------------------------------------------------------
+# 4.  Compute L2 & SSIM between predicted and true images
+# -----------------------------------------------------------------------------
+
+def evaluate(agent, env, steps: int = 100):
+    obs_list, next_list, act_list = [], [], []
     obs, _ = env.reset()
     for _ in range(steps):
-        act = agent.policy(obs)                    # assumes agent.policy exists
+        act = agent.policy(obs)
         nxt, _, term, trunc, _ = env.step(act)
-        obs_list.append(obs); nxt_list.append(nxt); act_list.append(act)
-        obs = nxt if not(term or trunc) else env.reset()[0]
+        obs_list.append(obs)
+        next_list.append(nxt)
+        act_list.append(act)
+        obs = env.reset()[0] if (term or trunc) else nxt
 
-    # batchify
-    batch_obs = {k:jnp.stack([o[k] for o in obs_list]) for k in obs_list[0]}
-    batch_nxt = {k:jnp.stack([o[k] for o in nxt_list]) for k in nxt_list[0]}
-    batch_act = {k:jnp.stack([a[k] for a in act_list]) for k in act_list[0]}
+    # batchify (assumes 'image' key exists after wrapper)
+    batch_obs  = {k: jnp.stack([o[k] for o in obs_list])  for k in obs_list[0]}
+    batch_next = {k: jnp.stack([o[k] for o in next_list]) for k in next_list[0]}
+    batch_act  = {k: jnp.stack([a[k] for a in act_list])  for k in act_list[0]}
+    reset_mask = jnp.zeros((steps,), dtype=jnp.bool_)
 
-    # encode current state
-    _, _, token = agent.encoder({}, batch_obs, jnp.zeros((steps,), bool),
-                                training=False)
-    carry, (_, feat) = agent.rssm.observe(
-        agent.rssm.initial(steps), token, batch_act,
-        jnp.zeros((steps,), bool), training=False, single=True)
+    # --- encode s_t ---
+    carry, _, tokens = agent.encoder({}, batch_obs, reset_mask, training=False)
 
-    _, _, recon = agent.decoder({}, feat, jnp.zeros((steps,), bool),
-                                training=False, single=True)
-    pred_img  = recon['image']          # (B,H,W,C) float in [0,1]
-    true_img  = batch_nxt['image'] / 255.0
+    # --- one‑step observe (posterior) to get predicted next features ---
+    carry, (_, feat) = agent.rssm.observe(carry, tokens, batch_act, reset_mask,
+                                         training=False, single=True)
 
-    l2s   = [l2(p,t) for p,t in zip(pred_img, true_img)]
-    ssims = [ssim(t, p, channel_axis=-1, data_range=1.0)
-             for p, t in zip(pred_img, true_img)]
+    # --- decode predicted image ---
+    _, _, recon = agent.decoder({}, feat, reset_mask, training=False)
+    pred_img  = np.clip(np.asarray(recon["image"]), 0.0, 1.0)  # (B,H,W,C)
+    true_img  = np.asarray(batch_next["image"], dtype=np.float32) / 255.0
 
-    print(f'L2   mean {np.mean(l2s):.4e}  ±{np.std(l2s):.2e}')
-    print(f'SSIM mean {np.mean(ssims):.3f}')
+    l2_vals   = np.mean((pred_img - true_img) ** 2, axis=(1, 2, 3))
+    ssim_vals = [sk_ssim(t, p, data_range=1.0, channel_axis=-1)
+                 for p, t in zip(pred_img, true_img)]
 
-# -----------------------------------------------------------------------------#
-# 3.  CLI
-# -----------------------------------------------------------------------------#
-if __name__ == '__main__':
+    print("\n=== RSSM 1‑step Prediction Metrics ===")
+    print(f"Mean L2   : {float(l2_vals.mean()):.5e}")
+    print(f"Std  L2   : {float(l2_vals.std() ):.5e}")
+    print(f"Mean SSIM : {float(np.mean(ssim_vals)):.4f}")
+    print("======================================\n")
+
+# -----------------------------------------------------------------------------
+# 5.  CLI Entrypoint
+# -----------------------------------------------------------------------------
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--logdir', required=True)
-    parser.add_argument('--task',   required=True)
-    parser.add_argument('--ckpt',   default='latest')
+    parser.add_argument("--logdir", required=True, help="path to logdir/<timestamp>")
+    parser.add_argument("--preset", required=True, help="config preset name, e.g. shadowhand_actual")
+    parser.add_argument("--ckpt",   default="latest", help="checkpoint filename or 'latest'")
+    parser.add_argument("--steps",  type=int, default=100, help="# real env steps to sample")
     args = parser.parse_args()
 
-    root = os.path.dirname(__file__)      # project root
-    config, agent, make_env = load_cfg_and_agent(root, args.task)
+    # ---- load config identical to main.py ----
+    cfg_path = PROJECT_ROOT / "dreamerv3" / "configs.yaml"
+    cfg      = load_config(cfg_path, args.preset)
 
-    # build real env (index 0, no overrides)
-    env = make_env(config, index=0)
+    # ---- build env exactly like training ----
+    main_mod = importlib.import_module("dreamerv3.main")
+    env      = main_mod.make_env(cfg, index=0)
 
-    # restore weights
-    ckpt_dir  = os.path.join(args.logdir, 'ckpt')
-    ckpt_file = latest_ckpt(ckpt_dir) if args.ckpt == 'latest' \
-                 else os.path.join(ckpt_dir, args.ckpt)
-    restore(agent, ckpt_file)
-    print('Loaded checkpoint', ckpt_file)
+    # ---- construct Agent with matching spaces ----
+    from dreamerv3.agent import Agent
+    obs_space = {k: v for k, v in env.obs_space.items() if not k.startswith("log/")}
+    act_space = {k: v for k, v in env.act_space.items() if k != "reset"}
+    agent     = Agent(obs_space, act_space, cfg.agent)
 
-    # run evaluation
-    evaluate(agent, env, steps=100)
+    # ---- restore checkpoint ----
+    ckpt_dir  = pathlib.Path(args.logdir) / "ckpt"
+    ckpt_file = latest_ckpt(ckpt_dir) if args.ckpt == "latest" else ckpt_dir / args.ckpt
+    restore_agent(agent, ckpt_file)
+    print("Loaded", ckpt_file)
+
+    # ---- run evaluation ----
+    evaluate(agent, env, steps=args.steps)
