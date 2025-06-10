@@ -7,6 +7,7 @@
 #
 # Requires: pip install scikit-image
 
+import sys
 import argparse, os, glob, importlib, functools
 import numpy as np
 import jax, jax.numpy as jnp
