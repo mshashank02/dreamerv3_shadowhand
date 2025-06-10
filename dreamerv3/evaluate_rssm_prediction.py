@@ -9,6 +9,10 @@
 
 import sys
 import argparse, os, glob, importlib, functools
+
+root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))  # one level up
+sys.path.insert(0, root)
+
 import numpy as np
 import jax, jax.numpy as jnp
 from skimage.metrics import structural_similarity as ssim
