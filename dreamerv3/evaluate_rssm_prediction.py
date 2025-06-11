@@ -22,7 +22,7 @@ def compute_ssim(pred, gt):
 
 def evaluate_rssm_prediction(args):
     # Resolve checkpoint dir using latest.txt
-    ckpt_txt = elements.Path(args.logdir) / 'ckpt' / 'latest.txt'
+    ckpt_txt = elements.Path(args.logdir) / 'ckpt' / 'latest'
     with open(ckpt_txt, 'r') as f:
         ckpt_name = f.read().strip()
     ckpt_path = elements.Path(args.logdir) / 'ckpt' / ckpt_name
