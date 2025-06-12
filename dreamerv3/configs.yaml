@@ -16,6 +16,7 @@ defaults:
   random_agent: False
   clock_addr: ''
   clock_port: ''
+  from_checkpoint: ''
   ipv6: False
   errfile: False
 
