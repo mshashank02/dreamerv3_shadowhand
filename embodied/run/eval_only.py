@@ -65,7 +65,7 @@ def eval_only(make_agent, make_env, make_logger, args):
       epstats.add(result)
       # ✅ Save video only on episode end for worker 0
       if worker == 0 and rendered_frames:
-        video_path = logdir / f"rollout_{int(step.value)}.mp4"
+        video_path = str(logdir / f"rollout_{int(step.value)}.mp4")  # ✅ Cast to str
         imageio.mimsave(video_path, rendered_frames, fps=30)
         print(f"[INFO] Saved video to {video_path}")
         rendered_frames.clear()  # Clear for next episode
