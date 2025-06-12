@@ -12,7 +12,7 @@
 
 import functools
 from typing import Any, Generic, TypeVar, Union, cast, Dict
-
+from PIL import Image 
 import embodied
 import gymnasium 
 import gymnasium_robotics
@@ -69,8 +69,9 @@ class FromGymnasium(embodied.Env, Generic[U, V]):
     if self._image_shape is None:
         try:
             self._env.reset()
-            self._image_shape = self._env.render().shape
-            print(f"[FromGymnasium] Detected image shape: {self._image_shape}")
+            original_shape = self._env.render().shape
+            print(f"[FromGymnasium] Original image shape: {original_shape}")
+            self._image_shape = (64, 64, 3)  # ✅ Set resized shape manually
         except Exception as e:
             print(f"[Warning] Could not determine image shape: {e}")
             self._image_shape = (64, 64, 3)  # fallback
@@ -146,8 +147,10 @@ class FromGymnasium(embodied.Env, Generic[U, V]):
     try:
         image = self._env.render()
         if image is not None:
-            np_obs['image'] = np.asarray(image)
-            print(f"[DEBUG] Rendered image shape: {np_obs['image'].shape}")
+            resized = np.array(Image.fromarray(image).resize((64, 64)))
+            np_obs['image'] = resized
+            if is_first:
+             print(f"[DEBUG] Rendered image shape: {np_obs['image'].shape}")
         else:
             np_obs['image'] = np.zeros((64, 64, 3), dtype=np.uint8)
             print(f"[DEBUG] Using fallback image shape: {np_obs['image'].shape}")
