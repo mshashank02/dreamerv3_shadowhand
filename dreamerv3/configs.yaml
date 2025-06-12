@@ -16,7 +16,6 @@ defaults:
   random_agent: False
   clock_addr: ''
   clock_port: ''
-  from_checkpoint: '/home/shashank/logdir/dreamer/20250610T233712/ckpt/20250611T122254F014285'
   ipv6: False
   errfile: False
 

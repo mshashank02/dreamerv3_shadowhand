@@ -7,6 +7,7 @@ import numpy as np
 
 
 def eval_only(make_agent, make_env, make_logger, args):
+  print('Received args:', vars(args))
   assert args.from_checkpoint
 
   agent = make_agent()
