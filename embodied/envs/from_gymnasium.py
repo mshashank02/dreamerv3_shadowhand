@@ -127,9 +127,15 @@ class FromGymnasium(embodied.Env, Generic[U, V]):
     # Convert to NumPy arrays and add meta info
     np_obs: Dict[str, Any] = {k: np.asarray(v) for k, v in obs.items()}
 
-    image = self._env.render()
-    if image is not None:
-      np_obs['image'] = np.asarray(image)
+    try:
+        image = self._env.render()
+        if image is not None:
+            np_obs['image'] = np.asarray(image)
+        else:
+            np_obs['image'] = np.zeros((64, 64, 3), dtype=np.uint8)
+    except Exception as e:
+        print(f"[Warning] Render failed: {e}")
+        np_obs['image'] = np.zeros((64, 64, 3), dtype=np.uint8)
     np_obs.update(
         reward=np.float32(reward),
         is_first=is_first,
