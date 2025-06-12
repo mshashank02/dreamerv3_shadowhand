@@ -70,9 +70,11 @@ class FromGymnasium(embodied.Env, Generic[U, V]):
         try:
             self._env.reset()
             self._image_shape = self._env.render().shape
+            print(f"[FromGymnasium] Detected image shape: {self._image_shape}")
         except Exception as e:
             print(f"[Warning] Could not determine image shape: {e}")
             self._image_shape = (64, 64, 3)  # fallback
+            print(f"[FromGymnasium] Using fallback image shape: {self._image_shape}")
 
     # ✅ Now add image space
     spaces['image'] = elements.Space(np.uint8, self._image_shape, 0, 255)
