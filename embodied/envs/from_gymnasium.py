@@ -36,6 +36,9 @@ class FromGymnasium(embodied.Env, Generic[U, V]):
     self._act_key = act_key
     self._done = True
     self._info = None
+    self._image_shape = self._env.render().shape  # render once to get the image shape
+    print(f"[FromGymnasium] image shape: {self._image_shape}")
+
 
   @property
   def info(self):
@@ -65,6 +68,7 @@ class FromGymnasium(embodied.Env, Generic[U, V]):
     
     return {
         **spaces,
+        'image': elements.Space(np.uint8, self._image_shape, 0, 255),
         'reward': elements.Space(np.float32),
         'is_first': elements.Space(bool),
         'is_last': elements.Space(bool),
