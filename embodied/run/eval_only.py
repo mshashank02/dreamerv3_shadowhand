@@ -4,6 +4,7 @@ from functools import partial as bind
 import elements
 import embodied
 import numpy as np
+import imageio
 
 
 def eval_only(make_agent, make_env, make_logger, args):
@@ -24,6 +25,9 @@ def eval_only(make_agent, make_env, make_logger, args):
   should_log = elements.when.Clock(args.log_every)
   policy_fps = elements.FPS()
 
+
+  rendered_frames = []  # ✅ Track frames globally for video
+
   @elements.timer.section('logfn')
   def logfn(tran, worker):
     episode = episodes[worker]
@@ -31,6 +35,15 @@ def eval_only(make_agent, make_env, make_logger, args):
     episode.add('score', tran['reward'], agg='sum')
     episode.add('length', 1, agg='sum')
     episode.add('rewards', tran['reward'], agg='stack')
+    # ✅ Record frame only for worker 0
+    if worker == 0:
+      try:
+        frame = driver.envs[0].render()
+        if frame is not None:
+          rendered_frames.append(frame)
+      except Exception as e:
+        print(f"[Warning] Could not render frame: {e}")
+
     for key, value in tran.items():
       isimage = (value.dtype == np.uint8) and (value.ndim == 3)
       if isimage and worker == 0:
@@ -50,6 +63,12 @@ def eval_only(make_agent, make_env, make_logger, args):
       if len(rew) > 1:
         result['reward_rate'] = (np.abs(rew[1:] - rew[:-1]) >= 0.01).mean()
       epstats.add(result)
+      # ✅ Save video only on episode end for worker 0
+      if worker == 0 and rendered_frames:
+        video_path = logdir / f"rollout_{int(step.value)}.mp4"
+        imageio.mimsave(video_path, rendered_frames, fps=30)
+        print(f"[INFO] Saved video to {video_path}")
+        rendered_frames.clear()  # Clear for next episode
 
   fns = [bind(make_env, i) for i in range(args.envs)]
   driver = embodied.Driver(fns, parallel=(not args.debug))
