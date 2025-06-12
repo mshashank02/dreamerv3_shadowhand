@@ -36,7 +36,7 @@ class FromGymnasium(embodied.Env, Generic[U, V]):
     self._act_key = act_key
     self._done = True
     self._info = None
-    self._image_shape = self._env.render().shape  # render once to get the image shape
+    self._image_shape = None
     print(f"[FromGymnasium] image shape: {self._image_shape}")
 
 
@@ -66,9 +66,20 @@ class FromGymnasium(embodied.Env, Generic[U, V]):
     # Convert each Gym space to an Elements space
     spaces = {k: self._convert(v) for k, v in spaces.items()}
     
+        # ✅ Delay render until after env.reset()
+    if self._image_shape is None:
+        try:
+            self._env.reset()
+            self._image_shape = self._env.render().shape
+        except Exception as e:
+            print(f"[Warning] Could not determine image shape: {e}")
+            self._image_shape = (64, 64, 3)  # fallback
+
+    # ✅ Now add image space
+    spaces['image'] = elements.Space(np.uint8, self._image_shape, 0, 255)
+
     return {
         **spaces,
-        'image': elements.Space(np.uint8, self._image_shape, 0, 255),
         'reward': elements.Space(np.float32),
         'is_first': elements.Space(bool),
         'is_last': elements.Space(bool),
