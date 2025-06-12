@@ -37,7 +37,6 @@ class FromGymnasium(embodied.Env, Generic[U, V]):
     self._done = True
     self._info = None
     self._image_shape = None
-    print(f"[FromGymnasium] image shape: {self._image_shape}")
 
 
   @property
