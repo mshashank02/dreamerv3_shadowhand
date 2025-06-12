@@ -45,9 +45,11 @@ def eval_only(make_agent, make_env, make_logger, args):
         print(f"[Warning] Could not render frame: {e}")
 
     for key, value in tran.items():
-      isimage = (value.dtype == np.uint8) and (value.ndim == 3)
-      if isimage and worker == 0:
-        episode.add(f'policy_{key}', value, agg='stack')
+      # isimage = (value.dtype == np.uint8) and (value.ndim == 3)
+      # if isimage and worker == 0:
+      #   episode.add(f'policy_{key}', value, agg='stack')
+      if key == '_rendered_image' and worker == 0:
+        episode.add('video', value, agg='stack')  # Only for saving videos
       elif key.startswith('log/'):
         assert value.ndim == 0, (key, value.shape, value.dtype)
         episode.add(key + '/avg', value, agg='avg')
@@ -55,6 +57,11 @@ def eval_only(make_agent, make_env, make_logger, args):
         episode.add(key + '/sum', value, agg='sum')
     if tran['is_last']:
       result = episode.result()
+    if 'video' in result:
+      video = result['video']
+      video_path = logdir / f'rollout_{int(step)}.mp4'
+      imageio.mimsave(video_path, video, fps=30)
+      print(f"[INFO] Saved video to {video_path}")
       logger.add({
           'score': result.pop('score'),
           'length': result.pop('length'),

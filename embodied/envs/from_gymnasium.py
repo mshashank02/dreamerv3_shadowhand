@@ -148,7 +148,7 @@ class FromGymnasium(embodied.Env, Generic[U, V]):
         image = self._env.render()
         if image is not None:
             resized = np.array(Image.fromarray(image).resize((64, 64)))
-            #np_obs['image'] = resized
+            np_obs['_rendered_image'] = resized
             if is_first:
              print(f"[DEBUG] Rendered image shape: {np_obs['image'].shape}")
         else:
