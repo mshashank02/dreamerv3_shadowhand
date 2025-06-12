@@ -126,6 +126,10 @@ class FromGymnasium(embodied.Env, Generic[U, V]):
 
     # Convert to NumPy arrays and add meta info
     np_obs: Dict[str, Any] = {k: np.asarray(v) for k, v in obs.items()}
+
+    image = self._env.render()
+    if image is not None:
+      np_obs['image'] = np.asarray(image)
     np_obs.update(
         reward=np.float32(reward),
         is_first=is_first,
