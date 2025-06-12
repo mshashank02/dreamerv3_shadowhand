@@ -157,12 +157,15 @@ class FromGymnasium(embodied.Env, Generic[U, V]):
     except Exception as e:
         print(f"[Warning] Render failed: {e}")
         #np_obs['image'] = np.zeros((64, 64, 3), dtype=np.uint8)
+    if self._info is None:
+      self._info = {}
+    self._info['render'] = self._latest_render
     np_obs.update(
         reward=np.float32(reward),
         is_first=is_first,
         is_last=is_last,
         is_terminal=is_terminal)
-    self._info['render'] = self._latest_render  # store it for use in logfn()
+    
 
     return np_obs
 
