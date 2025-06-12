@@ -78,7 +78,7 @@ class FromGymnasium(embodied.Env, Generic[U, V]):
             print(f"[FromGymnasium] Using fallback image shape: {self._image_shape}")
 
     # ✅ Now add image space
-    spaces['image'] = elements.Space(np.uint8, self._image_shape, 0, 255)
+    #spaces['image'] = elements.Space(np.uint8, self._image_shape, 0, 255)
 
     return {
         **spaces,
@@ -148,15 +148,15 @@ class FromGymnasium(embodied.Env, Generic[U, V]):
         image = self._env.render()
         if image is not None:
             resized = np.array(Image.fromarray(image).resize((64, 64)))
-            np_obs['image'] = resized
+            #np_obs['image'] = resized
             if is_first:
              print(f"[DEBUG] Rendered image shape: {np_obs['image'].shape}")
         else:
-            np_obs['image'] = np.zeros((64, 64, 3), dtype=np.uint8)
+            #np_obs['image'] = np.zeros((64, 64, 3), dtype=np.uint8)
             print(f"[DEBUG] Using fallback image shape: {np_obs['image'].shape}")
     except Exception as e:
         print(f"[Warning] Render failed: {e}")
-        np_obs['image'] = np.zeros((64, 64, 3), dtype=np.uint8)
+        #np_obs['image'] = np.zeros((64, 64, 3), dtype=np.uint8)
     np_obs.update(
         reward=np.float32(reward),
         is_first=is_first,
